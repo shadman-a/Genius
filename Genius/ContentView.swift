@@ -22,7 +22,7 @@ class ChatViewModel: ObservableObject {
     init() {
         session = LanguageModelSession(
             model: model,
-            instructions: "Act like a pirate argh"
+            instructions: "You are a helpful AI assistant that give nice short answers in a super friendly way. Type anything you would like to know and I will do my best to help!"
         )
     }
 
@@ -80,14 +80,15 @@ struct ChatBubbleView: View {
     let message: Message
 
     var body: some View {
-        let attributed = (try? AttributedString(markdown: message.content)) ?? AttributedString(message.content)
+        let attributed = AttributedString(message.content)
         let tint = message.role == .user ? Color.cyan.opacity(0.4) : Color.white.opacity(0.6)
         let shadowColor = message.role == .assistant ? Color.cyan.opacity(0.9) : .clear
 
         return HStack {
-            if message.role == .assistant { Spacer() }
+            if message.role == .user { Spacer() }
 
             Text(attributed)
+                .textSelection(.enabled)
                 .padding(12)
                 .glassEffect(
                     Glass.regular.tint(tint),
@@ -95,9 +96,8 @@ struct ChatBubbleView: View {
                 )
                 .foregroundStyle(message.role == .user ? .primary : Color.white)
                 .shadow(color: shadowColor, radius: message.role == .assistant ? 12 : 0)
-                .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
 
-            if message.role == .user { Spacer() }
+            if message.role == .assistant { Spacer() }
         }
     }
 }
@@ -124,13 +124,13 @@ struct InputBar: View {
             Button(action: sendAction) {
                 Image(systemName: "paperplane.fill")
                     .font(.title2)
-                    .padding(12)
+                    .padding(4)
             }
             .buttonStyle(.glass)
             .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
         .padding(.horizontal)
-        .padding(.vertical, 8)
+        .padding(.vertical, 2)
     }
 }
 
@@ -157,7 +157,6 @@ struct TypingIndicatorView: View {
 struct LoadingView: View {
     var body: some View {
         HStack {
-            Spacer()
             TypingIndicatorView()
                 .padding(12)
                 .glassEffect(
@@ -177,6 +176,7 @@ struct LoadingView: View {
 struct ContentView: View {
     @StateObject private var vm = ChatViewModel()
     @State private var draft = ""
+    @FocusState private var isInputActive: Bool
 
     var body: some View {
         ZStack {
@@ -194,7 +194,7 @@ struct ContentView: View {
             GlassEffectContainer(spacing: 16) {
                 VStack(spacing: 0) {
                     ScrollViewReader { proxy in
-                        ScrollView {
+                        ScrollView(.vertical, showsIndicators: false) {
                             LazyVStack(spacing: 12) {
                                 ForEach(vm.messages) { msg in
                                     ChatBubbleView(message: msg)
@@ -204,12 +204,13 @@ struct ContentView: View {
                                     LoadingView()
                                 }
                             }
-                            .padding(.horizontal, 8)
-                            .padding(.bottom, 80)
-                            .onChange(of: vm.messages.count) { _ in
-                                if let last = vm.messages.last {
-                                    proxy.scrollTo(last.id, anchor: .bottom)
-                                }
+                            .padding(.horizontal, 4)  // optional: small horizontal padding
+                        }
+                        .scrollDismissesKeyboard(.immediately)
+                        .frame(maxHeight: .infinity) // allow scroll area to expand
+                        .onChange(of: vm.messages.count) { _ in
+                            if let last = vm.messages.last {
+                                proxy.scrollTo(last.id, anchor: .bottom)
                             }
                         }
                     }
@@ -219,11 +220,11 @@ struct ContentView: View {
                         draft = ""
                         Task { await vm.send(text) }
                     }
+                    .focused($isInputActive)
                 }
-                .padding(.horizontal, 8)
             }
-            .padding(.horizontal, 8)
-            .ignoresSafeArea(.keyboard, edges: .bottom)
+            .padding(6)
+            .onTapGesture { isInputActive = false }
         }
     }
 }
