@@ -9,28 +9,34 @@ import SwiftUI
 import Combine
 import FoundationModels
 
+// MARK: – ViewModel
+
 @MainActor
 class ChatViewModel: ObservableObject {
     @Published var messages: [Message] = []
-    
+    @Published var isLoading = false
+
     private let session: LanguageModelSession
     private let model = SystemLanguageModel.default
 
     init() {
-        session = LanguageModelSession(model: model,
-                                       instructions: "You are a helpful AI assistant that chats like ChatGPT.")
+        session = LanguageModelSession(
+            model: model,
+            instructions: "Act like a pirate argh"
+        )
     }
 
     func send(_ text: String) async {
         guard !text.isEmpty else { return }
+
+        // Check model availability
         switch model.availability {
-        case .available:
-            break
+        case .available: break
         case .unavailable(.deviceNotEligible):
-            messages.append(.assistant("❌ Your device doesn’t support Apple Intelligence."))
+            messages.append(.assistant("❌ Device not supported."))
             return
         case .unavailable(.appleIntelligenceNotEnabled):
-            messages.append(.assistant("❌ Please enable Apple Intelligence in Settings."))
+            messages.append(.assistant("❌ Enable Apple Intelligence in Settings."))
             return
         case .unavailable(.modelNotReady):
             messages.append(.assistant("⌛ Model is downloading—please wait."))
@@ -40,71 +46,184 @@ class ChatViewModel: ObservableObject {
             return
         }
 
+        // Append user message and start loader
         messages.append(.user(text))
+        isLoading = true
+
         do {
             let result = try await session.respond(to: Prompt(text))
             messages.append(.assistant(result.content))
         } catch {
             messages.append(.assistant("❌ Error: \(error.localizedDescription)"))
         }
+
+        isLoading = false
     }
 }
+
+// MARK: – Model
 
 struct Message: Identifiable {
     enum Role { case user, assistant }
     let id = UUID()
     let role: Role
     let content: String
-    
+
     static func user(_ text: String) -> Message { .init(role: .user, content: text) }
     static func assistant(_ text: String) -> Message { .init(role: .assistant, content: text) }
 }
 
+// MARK: – Subviews
+
+/// A single chat bubble with Glass effect and optional glow
+struct ChatBubbleView: View {
+    let message: Message
+
+    var body: some View {
+        let attributed = (try? AttributedString(markdown: message.content)) ?? AttributedString(message.content)
+        let tint = message.role == .user ? Color.cyan.opacity(0.4) : Color.white.opacity(0.6)
+        let shadowColor = message.role == .assistant ? Color.cyan.opacity(0.9) : .clear
+
+        return HStack {
+            if message.role == .assistant { Spacer() }
+
+            Text(attributed)
+                .padding(12)
+                .glassEffect(
+                    Glass.regular.tint(tint),
+                    in: RoundedRectangle(cornerRadius: 16)
+                )
+                .foregroundStyle(message.role == .user ? .primary : Color.white)
+                .shadow(color: shadowColor, radius: message.role == .assistant ? 12 : 0)
+                .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
+
+            if message.role == .user { Spacer() }
+        }
+    }
+}
+
+/// The input bar with glass text field and send button
+struct InputBar: View {
+    @Binding var draft: String
+    var sendAction: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            TextField("Say something…", text: $draft)
+                .padding(10)
+                .autocorrectionDisabled(true)
+                .glassEffect(
+                    Glass.regular
+                        .interactive(true)
+                        .tint(Color.white.opacity(0.25)),
+                    in: RoundedRectangle(cornerRadius: 12)
+                )
+                .frame(maxWidth: .infinity)
+            Spacer()
+
+            Button(action: sendAction) {
+                Image(systemName: "paperplane.fill")
+                    .font(.title2)
+                    .padding(12)
+            }
+            .buttonStyle(.glass)
+            .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+    }
+}
+
+/// A Siri-like typing indicator with animated dots
+struct TypingIndicatorView: View {
+    @State private var dotCount = 0
+    private let timer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(0..<3) { index in
+                Circle()
+                    .frame(width: 8, height: 8)
+                    .foregroundColor(.white.opacity(dotCount == index ? 1 : 0.3))
+            }
+        }
+        .onReceive(timer) { _ in
+            dotCount = (dotCount + 1) % 3
+        }
+    }
+}
+
+/// A centered glass spinner while loading
+struct LoadingView: View {
+    var body: some View {
+        HStack {
+            Spacer()
+            TypingIndicatorView()
+                .padding(12)
+                .glassEffect(
+                    Glass.regular
+                        .tint(Color.white.opacity(0.3))
+                        .interactive(true),
+                    in: Circle()
+                )
+            Spacer()
+        }
+        .padding(.vertical, 8)
+    }
+}
+
+// MARK: – Main View
+
 struct ContentView: View {
     @StateObject private var vm = ChatViewModel()
     @State private var draft = ""
-    
+
     var body: some View {
-        VStack(spacing: 0) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(spacing: 8) {
-                        ForEach(vm.messages) { msg in
-                            HStack {
-                                if msg.role == .assistant { Spacer() }
-                                Text(msg.content)
-                                    .padding()
-                                    .background(
-                                        msg.role == .user
-                                            ? Color.blue.opacity(0.2)
-                                            : Color.gray.opacity(0.2)
-                                    )
-                                    .cornerRadius(10)
-                                if msg.role == .user { Spacer() }
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color.cyan.opacity(0.3),
+                    Color.blue.opacity(0.5),
+                    Color.cyan.opacity(0.3)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+
+            GlassEffectContainer(spacing: 16) {
+                VStack(spacing: 0) {
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVStack(spacing: 12) {
+                                ForEach(vm.messages) { msg in
+                                    ChatBubbleView(message: msg)
+                                        .id(msg.id)
+                                }
+                                if vm.isLoading {
+                                    LoadingView()
+                                }
                             }
-                            .id(msg.id)
+                            .padding(.horizontal, 8)
+                            .padding(.bottom, 80)
+                            .onChange(of: vm.messages.count) { _ in
+                                if let last = vm.messages.last {
+                                    proxy.scrollTo(last.id, anchor: .bottom)
+                                }
+                            }
                         }
                     }
-                    .padding()
-                    .onChange(of: vm.messages.count) { _ in
-                        if let last = vm.messages.last {
-                            proxy.scrollTo(last.id, anchor: .bottom)
-                        }
+
+                    InputBar(draft: $draft) {
+                        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+                        draft = ""
+                        Task { await vm.send(text) }
                     }
                 }
+                .padding(.horizontal, 8)
             }
-            HStack {
-                TextField("Say something…", text: $draft)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                    .autocorrectionDisabled(true)
-                Button("Send") {
-                    let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-                    draft = ""
-                    Task { await vm.send(text) }
-                }
-                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-            .padding()
+            .padding(.horizontal, 8)
+            .ignoresSafeArea(.keyboard, edges: .bottom)
         }
     }
 }
